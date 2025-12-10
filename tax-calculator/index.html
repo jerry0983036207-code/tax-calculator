@@ -1,0 +1,2945 @@
+<!DOCTYPE html>
+
+<html lang="zh-TW">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>全方位房地產稅務計算機</title>
+
+    
+
+    <!-- 1. 載入 Tailwind CSS (樣式) -->
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    
+
+    <!-- 2. 載入 React 與 Babel (核心邏輯) -->
+
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    
+
+    <!-- 3. 設定字體 (標楷體/微軟正黑體) -->
+
+    <style>
+
+        body, input, select, button, textarea {
+
+            font-family: "Microsoft JhengHei", "PingFang TC", "Heiti TC", "Apple LiGothic", sans-serif !important;
+
+        }
+
+        /* 隱藏列印時的非必要元素 */
+
+        @media print { 
+
+            body { background: white; } 
+
+            .print\:hidden { display: none !important; } 
+
+            .print\:bg-white { background: white !important; color: black !important; } 
+
+            .print\:border { border: 1px solid #ddd !important; } 
+
+            .print\:shadow-none { box-shadow: none !important; } 
+
+            .print\:p-4 { padding: 1rem !important; }
+
+            .print\:text-black { color: black !important; }
+
+            .print\:border-gray-300 { border-color: #d1d5db !important; }
+
+        }
+
+    </style>
+
+</head>
+
+<body class="bg-gray-100">
+
+    <div id="root"></div>
+
+
+
+    <!-- 4. 應用程式主邏輯 -->
+
+    <script type="text/babel" data-type="module">
+
+        // 從 CDN 引入 React 模組
+
+        import React, { useState, useMemo, useEffect, useRef } from 'https://esm.sh/react@18.2.0';
+
+        import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+
+        
+
+        // 引入 Lucide 圖示
+
+        import { 
+
+            Calculator, DollarSign, Users, Code, Crown, Leaf, AlertCircle, Sparkles, 
+
+            CheckCircle2, ArrowRight, PiggyBank, Home, TrendingUp, Archive, Calendar, 
+
+            Info, Gift, Printer, Moon, Shield, FileText, PieChart as PieChartIcon, 
+
+            Umbrella, BarChart2, TrendingDown, Copy, Briefcase, RotateCcw, Bot, Key, 
+
+            Eye, EyeOff
+
+        } from 'https://esm.sh/lucide-react@0.292.0';
+
+
+
+        // ==========================================
+
+        // 1. 核心參數與資料 (2025 稅制)
+
+        // ==========================================
+
+
+
+        const ESTATE_TAX_RULES_2025 = {
+
+            exemption: 13330000,
+
+            deductions: {
+
+                spouse: 5530000,
+
+                parent: 1380000,
+
+                child: 560000,
+
+                sibling: 560000,
+
+                disabled: 6930000,
+
+                funeral: 1380000,
+
+            },
+
+            brackets: [
+
+                { limit: 56210000, rate: 0.10, progressiveDeduction: 0 },
+
+                { limit: 112420000, rate: 0.15, progressiveDeduction: 2810500 },
+
+                { limit: Infinity, rate: 0.20, progressiveDeduction: 8431500 },
+
+            ]
+
+        };
+
+
+
+        const GIFT_TAX_RULES_2025 = {
+
+            exemption: 2440000,
+
+            brackets: [
+
+                { limit: 25000000, rate: 0.10, deduction: 0 },
+
+                { limit: 50000000, rate: 0.15, deduction: 1250000 },
+
+                { limit: Infinity, rate: 0.20, deduction: 3750000 },
+
+            ]
+
+        };
+
+
+
+        const INSURANCE_AMT_EXEMPTION = 37400000; 
+
+
+
+        // 系統預設 API Key (已設定)
+
+        const systemApiKey = "AIzaSyDOHS-pnsQLKmc5IYvYcgz4WXwD6nXZTjk"; 
+
+
+
+        const formatCurrency = (num) => {
+
+            if (num === null || num === undefined || isNaN(num)) return "$0";
+
+            return new Intl.NumberFormat('zh-TW', { 
+
+                style: 'currency', 
+
+                currency: 'TWD', 
+
+                minimumFractionDigits: 0,
+
+                maximumFractionDigits: 0
+
+            }).format(num);
+
+        };
+
+
+
+        const parseInput = (val) => {
+
+            if (val === '' || val === undefined || val === null) return 0;
+
+            const cleanVal = String(val).replace(/[^\d.-]/g, ''); 
+
+            const num = parseFloat(cleanVal);
+
+            return isNaN(num) ? 0 : num;
+
+        };
+
+
+
+        // --- Storage Helpers ---
+
+        const STORAGE_PREFIX = 'tax_calc_sales_v12_'; 
+
+
+
+        const getScenarios = () => {
+
+            try {
+
+                const saved = localStorage.getItem(STORAGE_PREFIX + 'scenarios');
+
+                return saved ? JSON.parse(saved) : { 'default': { name: '預設客戶', data: {} } };
+
+            } catch { return { 'default': { name: '預設客戶', data: {} } }; }
+
+        };
+
+
+
+        // ==========================================
+
+        // 2. 風格主題配置
+
+        // ==========================================
+
+        const THEMES = {
+
+            nordic: {
+
+                id: 'nordic',
+
+                name: '北歐森林',
+
+                icon: <Leaf size={18} />,
+
+                bgMain: 'bg-[#eef2f3] text-slate-700 font-sans print:bg-white',
+
+                header: 'bg-[#dbece5] border-b border-[#c8e1d6] text-[#2c5f4c] print:hidden',
+
+                card: 'bg-white rounded-3xl shadow-sm border border-[#e0e7e4] p-6 print:shadow-none print:border print:p-4',
+
+                inputLabel: 'block text-sm font-bold text-[#4a6b5d] mb-2',
+
+                inputField: 'w-full rounded-2xl border-[#cbd5d0] focus:ring-2 focus:ring-[#5b9e84] focus:border-[#5b9e84] transition-all py-3 px-4 bg-[#f8faf9]',
+
+                valueDisplay: 'w-full py-3 px-4 bg-transparent border-b border-[#cbd5d0] text-[#2f8565] font-bold text-lg', 
+
+                accentColor: 'text-[#2f8565]',
+
+                accentBg: 'bg-[#2f8565]',
+
+                tabActive: 'text-[#1e5742] bg-white shadow-sm rounded-xl font-bold',
+
+                tabInactive: 'text-[#6b8c80] hover:text-[#2f8565] hover:bg-[#e6f0ec]',
+
+                primaryBtn: 'bg-[#2f8565] hover:bg-[#256a50] text-white rounded-xl shadow-md transition-all print:hidden',
+
+                resultBox: 'bg-[#2c5f4c] text-white rounded-3xl shadow-lg print:bg-white print:text-black print:border-2 print:border-black',
+
+                mobileFooter: 'bg-[#dbece5]/90 backdrop-blur-md border-t border-[#c8e1d6] print:hidden',
+
+            },
+
+            dark: {
+
+                id: 'dark',
+
+                name: '深色極客',
+
+                icon: <Moon size={18} />,
+
+                bgMain: 'bg-[#0f172a] text-slate-300 font-mono print:bg-white print:text-black',
+
+                header: 'bg-[#1e293b]/80 backdrop-blur-md border-b border-slate-700 print:hidden',
+
+                card: 'bg-[#1e293b] rounded-xl shadow-xl border border-slate-700 p-6 print:shadow-none print:border print:p-4 print:bg-white print:text-black',
+
+                inputLabel: 'block text-xs font-mono text-cyan-400 mb-2 uppercase tracking-wider',
+
+                inputField: 'w-full rounded-lg border-slate-600 bg-[#0f172a] focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-all py-2.5 px-4 text-white placeholder-slate-600 print:bg-white print:text-black print:border-gray-300',
+
+                valueDisplay: 'w-full py-2.5 px-4 bg-transparent border-b border-slate-600 text-cyan-300 font-bold text-lg font-mono',
+
+                accentColor: 'text-cyan-400',
+
+                accentBg: 'bg-cyan-500',
+
+                tabActive: 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-950/30',
+
+                tabInactive: 'text-slate-500 hover:text-cyan-300 hover:bg-slate-800',
+
+                primaryBtn: 'bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg shadow-[0_0_15px_rgba(8,145,178,0.5)] transition-all print:hidden',
+
+                resultBox: 'bg-slate-900 border border-cyan-500/50 text-cyan-50 rounded-xl shadow-2xl print:bg-white print:text-black print:border-2 print:border-black',
+
+                mobileFooter: 'bg-[#0f172a]/90 backdrop-blur-md border-t border-slate-700 print:hidden',
+
+            },
+
+            zen: {
+
+                id: 'zen',
+
+                name: '日式侘寂',
+
+                icon: <Users size={18} />, 
+
+                bgMain: 'bg-[#f7f3e8] text-[#595045] font-serif tracking-wide print:bg-white',
+
+                header: 'bg-[#f7f3e8] border-b border-[#e6dfcc] print:hidden',
+
+                card: 'bg-[#fdfbf7] rounded-sm shadow-[2px_2px_10px_rgba(0,0,0,0.03)] border border-[#e6dfcc] p-8 print:shadow-none print:border print:p-4',
+
+                inputLabel: 'block text-sm font-medium text-[#8c8273] mb-2',
+
+                inputField: 'w-full border-b border-[#c2b8a3] bg-transparent focus:border-[#8f5e47] outline-none transition-colors py-2 px-1 text-[#4a4238] rounded-none placeholder-[#c2b8a3]',
+
+                valueDisplay: 'w-full py-2 px-1 bg-transparent border-b-2 border-[#8f5e47] text-[#4a4238] font-bold text-lg',
+
+                accentColor: 'text-[#8f5e47]',
+
+                accentBg: 'bg-[#8f5e47]',
+
+                tabActive: 'text-[#4a4238] font-bold border-l-4 border-[#8f5e47] bg-[#f0ebe0] pl-4',
+
+                tabInactive: 'text-[#9e9486] hover:text-[#595045] hover:bg-[#f0ebe0]/50 pl-4 border-l-4 border-transparent',
+
+                primaryBtn: 'bg-[#595045] hover:bg-[#4a4238] text-[#f7f3e8] rounded-sm px-6 py-2 transition-all print:hidden',
+
+                resultBox: 'bg-[#4a4238] text-[#f7f3e8] rounded-sm shadow-md p-6 print:bg-white print:text-black print:border-2 print:border-black',
+
+                mobileFooter: 'bg-[#f7f3e8]/95 border-t border-[#e6dfcc] print:hidden',
+
+            }
+
+        };
+
+
+
+        // =========================================
+
+        // 3. 通用 UI 組件
+
+        // =========================================
+
+
+
+        function InputField({ label, value, onChange, theme, placeholder, type = "text", prefix, step, highlight, readOnly, warning }) {
+
+            const [isFocused, setIsFocused] = useState(false);
+
+            
+
+            if (readOnly) {
+
+                return (
+
+                    <div className="relative mb-2">
+
+                        <label className={theme.inputLabel}>{label}</label>
+
+                        <div className={`flex items-center ${theme.valueDisplay}`}>
+
+                            {(prefix || type === 'number') && <span className="mr-1 opacity-70 text-sm">{prefix || '$'}</span>}
+
+                            {type === 'number' ? formatCurrency(value).replace('NT$', '').trim() : value}
+
+                        </div>
+
+                        {warning && <p className="text-xs text-red-500 mt-1 font-bold">{warning}</p>}
+
+                    </div>
+
+                );
+
+            }
+
+
+
+            return (
+
+                <div className="relative mb-2">
+
+                <label className={theme.inputLabel}>{label}</label>
+
+                <div className="relative group">
+
+                    {(prefix || type === 'number') && (
+
+                    <div className={`absolute left-0 top-1/2 -translate-y-1/2 pl-3 pointer-events-none transition-colors ${isFocused ? theme.accentColor : 'text-gray-400'}`}>
+
+                        {theme.id === 'zen' ? <span className="text-xs">{prefix || '$'}</span> : (prefix || <DollarSign size={16} />)}
+
+                    </div>
+
+                    )}
+
+                    <input
+
+                    type={type}
+
+                    value={value === 0 && type === 'number' ? '' : value}
+
+                    onChange={(e) => onChange(type === 'number' ? e.target.value : e.target.value)}
+
+                    onFocus={(e) => { setIsFocused(true); if(type==='number') e.target.select(); }}
+
+                    onBlur={() => setIsFocused(false)}
+
+                    step={step}
+
+                    className={`${theme.inputField} ${(prefix || type === 'number') ? 'pl-8' : ''} ${highlight && theme.id !== 'zen' ? 'font-bold ring-1 ring-offset-1 ring-blue-100' : ''}`}
+
+                    placeholder={placeholder}
+
+                    />
+
+                </div>
+
+                {warning && <p className="text-xs text-red-500 mt-1">{warning}</p>}
+
+                </div>
+
+            );
+
+        }
+
+
+
+        function SelectField({ label, value, onChange, options, theme, readOnly }) {
+
+            if (readOnly) {
+
+                const selected = options.find(o => o.value === value);
+
+                return (
+
+                    <div className="relative mb-2">
+
+                        <label className={theme.inputLabel}>{label}</label>
+
+                        <div className={theme.valueDisplay}>{selected ? selected.label : value}</div>
+
+                    </div>
+
+                );
+
+            }
+
+            return (
+
+                <div className="relative mb-2">
+
+                    <label className={theme.inputLabel}>{label}</label>
+
+                    <select
+
+                        value={value}
+
+                        onChange={(e) => onChange(e.target.value)}
+
+                        className={`${theme.inputField} appearance-none cursor-pointer`}
+
+                    >
+
+                        {options.map(opt => (
+
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+
+                        ))}
+
+                    </select>
+
+                </div>
+
+            )
+
+        }
+
+
+
+        function ResultRow({ label, value, isDeduction = false, theme, highlightColor, subLabel }) {
+
+            return (
+
+                <div className={`flex justify-between items-start py-2.5 ${theme.id === 'zen' ? 'border-b border-dotted border-[#dcd6c6]' : 'border-b border-dashed border-gray-100/10'} last:border-0 print:border-gray-300`}>
+
+                <div className="flex flex-col">
+
+                    <span className={`${theme.id === 'zen' ? 'text-[#595045]' : (theme.id === 'dark' ? 'text-slate-400' : 'text-slate-600')} text-sm`}>{label}</span>
+
+                    {subLabel && <span className="text-xs text-gray-400 mt-0.5 print:text-gray-600">{subLabel}</span>}
+
+                </div>
+
+                <span className={`font-medium ${
+
+                    highlightColor 
+
+                        ? highlightColor 
+
+                        : isDeduction 
+
+                            ? 'text-green-500' 
+
+                            : (theme.id === 'zen' ? 'text-[#2c2824]' : (theme.id === 'dark' ? 'text-slate-200' : 'text-slate-900'))
+
+                }`}>
+
+                    {isDeduction ? '-' : ''} {typeof value === 'number' ? formatCurrency(value) : value}
+
+                </span>
+
+                </div>
+
+            );
+
+        }
+
+
+
+        const EstateStackChart = ({ totalAssets, totalDeductions, theme }) => {
+
+            const width = 300;
+
+            const assets = Number(totalAssets) || 0;
+
+            const deductions = Number(totalDeductions) || 0;
+
+            
+
+            if (assets === 0) return null;
+
+            
+
+            const deductionWidth = Math.min(100, (deductions / assets) * 100);
+
+            const taxableWidth = Math.max(0, 100 - deductionWidth);
+
+            
+
+            return (
+
+                <div className={`w-full overflow-hidden mt-4 relative rounded-xl p-3 border ${theme.id === 'dark' ? 'bg-slate-700/50 border-slate-600' : 'bg-gray-50/50 border-gray-100'}`}>
+
+                    <h4 className={`text-xs text-center mb-3 font-bold ${theme.id === 'dark' ? 'text-slate-400' : 'text-gray-500'}`}>遺產稅抵扣覆蓋率</h4>
+
+                    <div className="relative h-8 w-full bg-gray-200 rounded-full overflow-hidden flex">
+
+                        <div className="h-full bg-green-500 flex items-center justify-center text-xs text-white font-bold transition-all duration-1000" style={{ width: `${deductionWidth}%` }}>
+
+                            {deductionWidth > 15 ? '免稅+扣除額' : ''}
+
+                        </div>
+
+                        <div className="h-full bg-red-400 flex items-center justify-center text-xs text-white font-bold transition-all duration-1000" style={{ width: `${taxableWidth}%` }}>
+
+                            {taxableWidth > 15 ? '課稅部分' : ''}
+
+                        </div>
+
+                    </div>
+
+                    <div className="flex justify-between text-xs mt-2 opacity-70">
+
+                        <span>總扣除額: {formatCurrency(deductions)}</span>
+
+                        <span className={taxableWidth > 0 ? 'text-red-500 font-bold' : 'text-green-600 font-bold'}>
+
+                            {taxableWidth > 0 ? `淨額: ${formatCurrency(assets - deductions)}` : '完全免稅'}
+
+                        </span>
+
+                    </div>
+
+                </div>
+
+            );
+
+        };
+
+
+
+        const LineChart = ({ data, theme }) => {
+
+            if (!data || data.length === 0) return null;
+
+            const width = 300;
+
+            const height = 150;
+
+            const padding = 20;
+
+            
+
+            const allValues = data.flatMap(d => [d.paid, d.value]);
+
+            const maxY = Math.max(...allValues, 100) * 1.1; 
+
+            const maxX = data.length > 1 ? data.length - 1 : 1;
+
+
+
+            const getX = (i) => padding + (i / maxX) * (width - 2 * padding);
+
+            const getY = (v) => height - padding - (v / maxY) * (height - 2 * padding);
+
+
+
+            const pointsPaid = data.map((d, i) => `${getX(i)},${getY(d.paid)}`).join(' ');
+
+            const pointsValue = data.map((d, i) => `${getX(i)},${getY(d.value)}`).join(' ');
+
+
+
+            let breakEvenIndex = -1;
+
+            for(let i=0; i<data.length; i++) {
+
+                if(data[i].value >= data[i].paid) {
+
+                    breakEvenIndex = i;
+
+                    break;
+
+                }
+
+            }
+
+
+
+            return (
+
+                <div className="w-full overflow-hidden mt-4 relative">
+
+                <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto">
+
+                    <defs>
+
+                        <linearGradient id="gradientValue" x1="0" x2="0" y1="0" y2="1">
+
+                            <stop offset="0%" stopColor={theme.id==='nordic'?'#2f8565':(theme.id==='dark'?'#22d3ee':'#8f5e47')} stopOpacity="0.3" />
+
+                            <stop offset="100%" stopColor={theme.id==='nordic'?'#2f8565':(theme.id==='dark'?'#22d3ee':'#8f5e47')} stopOpacity="0" />
+
+                        </linearGradient>
+
+                    </defs>
+
+                    <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#ccc" strokeWidth="1" />
+
+                    <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="#ccc" strokeWidth="1" />
+
+                    <polygon points={`${padding},${height-padding} ${pointsValue} ${width-padding},${height-padding}`} fill="url(#gradientValue)" />
+
+                    <polyline points={pointsPaid} fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4" />
+
+                    <polyline points={pointsValue} fill="none" stroke={theme.id==='nordic'?'#2f8565':(theme.id==='dark'?'#22d3ee':'#8f5e47')} strokeWidth="2.5" />
+
+                    {breakEvenIndex !== -1 && (
+
+                        <circle cx={getX(breakEvenIndex)} cy={getY(data[breakEvenIndex].value)} r="3" fill="#f87171" stroke="white" strokeWidth="1"/>
+
+                    )}
+
+                    <text x={width-padding} y={getY(data[data.length-1].paid)-5} fontSize="9" fill="#94a3b8" textAnchor="end">總保費</text>
+
+                    <text x={width-padding} y={getY(data[data.length-1].value)-5} fontSize="9" fill={theme.id==='nordic'?'#2f8565':(theme.id==='dark'?'#22d3ee':'#8f5e47')} textAnchor="end" fontWeight="bold">保單價值</text>
+
+                </svg>
+
+                </div>
+
+            );
+
+        };
+
+
+
+        const ComparisonBarChart = ({ cashTax, propertyTax, theme }) => {
+
+            const width = 300;
+
+            const height = 120;
+
+            const padding = 20;
+
+            const barWidth = 40;
+
+            
+
+            const cTax = Number(cashTax) || 0;
+
+            const pTax = Number(propertyTax) || 0;
+
+            
+
+            if (cTax === 0 && pTax === 0) return null;
+
+
+
+            const maxVal = Math.max(cTax, pTax, 10); 
+
+            
+
+            const cHeight = (cTax / maxVal) * (height - padding * 2);
+
+            const pHeight = (pTax / maxVal) * (height - padding * 2);
+
+            
+
+            const colorCash = '#94a3b8'; 
+
+            const colorProp = '#22c55e'; 
+
+
+
+            return (
+
+                <div className={`w-full overflow-hidden mt-4 relative rounded-xl p-2 border ${theme.id === 'dark' ? 'bg-slate-700/50 border-slate-600' : 'bg-gray-50/50 border-gray-100'}`}>
+
+                    <h4 className={`text-xs text-center mb-2 font-bold ${theme.id === 'dark' ? 'text-slate-400' : 'text-gray-500'}`}>稅額比較 (單位:萬)</h4>
+
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto">
+
+                        <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke={theme.id==='dark' ? '#475569' : '#ccc'} strokeWidth="1" />
+
+                        <rect x={width/3 - barWidth} y={height - padding - cHeight} width={barWidth} height={cHeight} fill={colorCash} rx="4" />
+
+                        <text x={width/3 - barWidth/2} y={height - padding - cHeight - 5} fontSize="12" fill={colorCash} textAnchor="middle" fontWeight="bold">{cTax}</text>
+
+                        <text x={width/3 - barWidth/2} y={height - 5} fontSize="10" fill={theme.id==='dark'?'#94a3b8':'#666'} textAnchor="middle">現金贈與</text>
+
+                        <rect x={width*2/3} y={height - padding - pHeight} width={barWidth} height={pHeight} fill={colorProp} rx="4" />
+
+                        <text x={width*2/3 + barWidth/2} y={height - padding - pHeight - 5} fontSize="12" fill={colorProp} textAnchor="middle" fontWeight="bold">{pTax}</text>
+
+                        <text x={width*2/3 + barWidth/2} y={height - 5} fontSize="10" fill={theme.id==='dark'?'#94a3b8':'#666'} textAnchor="middle">房產贈與</text>
+
+                    </svg>
+
+                </div>
+
+            )
+
+        }
+
+
+
+        // SimplePieChart
+
+        const SimplePieChart = ({ data, size = 100, theme }) => {
+
+            if (!data) return null;
+
+            const total = data.reduce((acc, item) => acc + (item.value || 0), 0);
+
+            if (total === 0) return <div className="w-full h-24 bg-gray-100/10 rounded-full flex items-center justify-center text-xs text-gray-400">尚無資料</div>;
+
+            let currentAngle = 0;
+
+            return (
+
+                <div className="flex items-center gap-4">
+
+                <svg width={size} height={size} viewBox="-1 -1 2 2" style={{ transform: 'rotate(-90deg)' }}>
+
+                    {data.map((item, index) => {
+
+                    const val = item.value || 0;
+
+                    const sliceAngle = (val / total) * 2 * Math.PI;
+
+                    const x1 = Math.cos(currentAngle);
+
+                    const y1 = Math.sin(currentAngle);
+
+                    const x2 = Math.cos(currentAngle + sliceAngle);
+
+                    const y2 = Math.sin(currentAngle + sliceAngle);
+
+                    const largeArcFlag = sliceAngle > Math.PI ? 1 : 0;
+
+                    const pathData = `M 0 0 L ${x1} ${y1} A 1 1 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
+
+                    currentAngle += sliceAngle;
+
+                    return <path key={index} d={pathData} fill={item.color} stroke={theme.id === 'dark' ? '#1e293b' : 'white'} strokeWidth="0.05" />;
+
+                    })}
+
+                </svg>
+
+                <div className="flex flex-col gap-1 text-xs">
+
+                    {data.map((item, index) => (
+
+                    (item.value || 0) > 0 && (
+
+                        <div key={index} className="flex items-center gap-2">
+
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }}></span>
+
+                        <span className={`opacity-80 ${theme.id==='dark'?'text-slate-300':''}`}>{item.label}: {Math.round((item.value/total)*100)}%</span>
+
+                        </div>
+
+                    )
+
+                    ))}
+
+                </div>
+
+                </div>
+
+            );
+
+        };
+
+
+
+        const TaxBracketProgress = ({ currentAmount, brackets, theme }) => {
+
+            const nextBracket = brackets.find(b => b.limit > currentAmount);
+
+            if (!nextBracket || nextBracket.limit === Infinity) return null;
+
+            const progress = Math.min(100, (currentAmount / nextBracket.limit) * 100);
+
+            return (
+
+                <div className="mt-4 print:hidden">
+
+                <div className={`flex justify-between text-xs mb-1 ${theme.id === 'dark' ? 'text-slate-500' : 'text-gray-500'}`}>
+
+                    <span>目前級距: {(brackets.find(b => b.limit >= currentAmount)?.rate || 0.1) * 100}%</span>
+
+                    <span>距離下個級距 ({nextBracket.rate * 100}%) 還差 {formatCurrency(nextBracket.limit - currentAmount)}</span>
+
+                </div>
+
+                <div className={`w-full rounded-full h-2.5 ${theme.id === 'dark' ? 'bg-slate-700' : 'bg-gray-200'}`}>
+
+                    <div className={`h-2.5 rounded-full ${theme.accentBg} transition-all duration-500`} style={{ width: `${progress}%` }}></div>
+
+                </div>
+
+                </div>
+
+            );
+
+        };
+
+
+
+        const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+
+
+        async function callGeminiTaxAdvisor(contextData, tabName, activeKey) {
+
+            if (!activeKey) return "⚠️ 請輸入 API Key 以啟用 AI 顧問。";
+
+            
+
+            const prompt = `
+
+                你是一位專業的台灣稅務顧問與資產配置專家 (2025年最新法規)。
+
+                請針對使用者目前的「${tabName}」試算情境進行深度診斷。
+
+                
+
+                使用者數據 JSON:
+
+                ${JSON.stringify(contextData)}
+
+
+
+                請提供以下分析 (使用繁體中文，Markdown 格式)：
+
+                1. **稅務現況分析**：解讀目前的稅率級距與風險點。
+
+                2. **節稅策略建議**：提供 3 個具體可行的合法節稅或資產配置建議（例如：夫妻贈與、分年贈與、公設地扣除、保險規劃等）。
+
+                3. **專家提醒**：針對該數據結構的潛在盲點（如實質課稅原則、房地合一自用條件等）。
+
+
+
+                語氣請專業、客觀且友善，直接針對數據回答，不需要過多開場白。
+
+            `;
+
+
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${activeKey}`;
+
+            const payload = {
+
+                contents: [{ parts: [{ text: prompt }] }]
+
+            };
+
+
+
+            const backoffDelays = [1000, 2000, 4000, 8000, 16000];
+
+            
+
+            for (let i = 0; i <= 5; i++) {
+
+                try {
+
+                    const response = await fetch(url, {
+
+                        method: "POST",
+
+                        headers: { "Content-Type": "application/json" },
+
+                        body: JSON.stringify(payload),
+
+                    });
+
+
+
+                    if (!response.ok) {
+
+                        if (response.status === 503 && i < 5) {
+
+                            await wait(backoffDelays[i]);
+
+                            continue;
+
+                        }
+
+                        const errorData = await response.json().catch(() => null);
+
+                        console.error("Gemini API Error Details:", errorData);
+
+                        throw new Error(errorData?.error?.message || "API request failed with status " + response.status);
+
+                    }
+
+                    
+
+                    const data = await response.json();
+
+                    return data.candidates?.[0]?.content?.parts?.[0]?.text || "無法產生分析報告，請稍後再試。";
+
+
+
+                } catch (error) {
+
+                    console.error(`Attempt ${i + 1} failed:`, error);
+
+                    if (i === 5) {
+
+                        return `AI 服務暫時忙碌或連線錯誤 (已重試 5 次)。請稍後再試。\n錯誤訊息: ${error.message}`;
+
+                    }
+
+                    await wait(backoffDelays[i]);
+
+                }
+
+            }
+
+        }
+
+
+
+        const AIAdvisor = ({ suggestions, theme, contextData, tabName }) => {
+
+            const [report, setReport] = useState("");
+
+            const [loading, setLoading] = useState(false);
+
+            const [expanded, setExpanded] = useState(false);
+
+            const [userKey, setUserKey] = useState(""); 
+
+
+
+            const handleGenerateReport = async () => {
+
+                const activeKey = userKey || systemApiKey;
+
+
+
+                if (!expanded) {
+
+                    setExpanded(true);
+
+                    if (!report && activeKey) {
+
+                        setLoading(true);
+
+                        const result = await callGeminiTaxAdvisor(contextData, tabName, activeKey);
+
+                        setReport(result);
+
+                        setLoading(false);
+
+                    }
+
+                } else {
+
+                    setExpanded(false);
+
+                }
+
+            };
+
+
+
+            const handleConfirmKey = async () => {
+
+                if(!userKey) return;
+
+                setLoading(true);
+
+                const result = await callGeminiTaxAdvisor(contextData, tabName, userKey);
+
+                setReport(result);
+
+                setLoading(false);
+
+            }
+
+
+
+            const showInput = expanded && !systemApiKey && !report && !loading;
+
+
+
+            return (
+
+                <section className={`${theme.card} ${theme.id === 'dark' ? 'bg-slate-800' : (theme.id === 'zen' ? 'bg-[#f0ebe0]' : 'bg-[#e0e7e4]')} border-none print:hidden transition-all duration-300`}>
+
+                <div className="flex items-center justify-between mb-4">
+
+                    <div className="flex items-center gap-2">
+
+                        <Sparkles className={theme.accentColor} size={20} />
+
+                        <h3 className={`font-bold ${theme.accentColor}`}>AI 稅務顧問</h3>
+
+                    </div>
+
+                    <button 
+
+                        onClick={handleGenerateReport}
+
+                        className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-full font-bold transition-all
+
+                            ${loading 
+
+                                ? 'bg-gray-200 text-gray-500 cursor-wait' 
+
+                                : (expanded ? 'bg-gray-200 text-gray-700 hover:bg-gray-300' : `text-white shadow-md hover:opacity-90 ${theme.id==='dark'?'bg-cyan-600':'bg-gradient-to-r from-violet-500 to-fuchsia-500'}`)
+
+                            }`}
+
+                    >
+
+                        {loading ? '分析中...' : (expanded ? '收合報告' : '✨ 生成深度診斷')}
+
+                        {!loading && !expanded && <Bot size={14} />}
+
+                    </button>
+
+                </div>
+
+
+
+                <div className="space-y-3">
+
+                    {suggestions.map((s, i) => (
+
+                    <div key={i} className={`flex gap-3 p-3 rounded-xl text-sm leading-relaxed shadow-sm ${theme.id==='dark'?'bg-slate-700 text-slate-200':'bg-white text-gray-700'}`}>
+
+                        <div className="mt-0.5 shrink-0">{s.icon}</div>
+
+                        <div><p className="font-bold mb-1">{s.title}</p><p className="opacity-90">{s.content}</p></div>
+
+                    </div>
+
+                    ))}
+
+                </div>
+
+
+
+                {expanded && (
+
+                    <div className={`mt-4 pt-4 border-t ${theme.id==='dark'?'border-slate-600':'border-black/5'} animate-in fade-in slide-in-from-top-2`}>
+
+                        
+
+                        {showInput && (
+
+                            <div className="p-4 bg-white/50 rounded-xl space-y-3">
+
+                                <div className="flex items-center gap-2 text-sm text-gray-600">
+
+                                    <Key size={16} />
+
+                                    <span>請輸入 Google Gemini API Key 以啟動 AI 分析：</span>
+
+                                </div>
+
+                                <div className="flex gap-2">
+
+                                    <input 
+
+                                        type="password" 
+
+                                        placeholder="AIzaSy..." 
+
+                                        value={userKey}
+
+                                        onChange={(e) => setUserKey(e.target.value)}
+
+                                        className="flex-1 p-2 border rounded-lg text-sm"
+
+                                    />
+
+                                    <button 
+
+                                        onClick={handleConfirmKey}
+
+                                        className={`px-4 py-2 rounded-lg text-sm text-white ${theme.id==='dark'?'bg-cyan-600':'bg-blue-600'} hover:opacity-90`}
+
+                                    >
+
+                                        開始分析
+
+                                    </button>
+
+                                </div>
+
+                                <p className="text-xs text-gray-400">
+
+                                    * 您的 Key 僅用於當次請求，不會被儲存。
+
+                                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline ml-1">取得免費 Key</a>
+
+                                </p>
+
+                            </div>
+
+                        )}
+
+
+
+                        {loading ? (
+
+                            <div className="flex flex-col items-center justify-center py-8 space-y-3 text-gray-500">
+
+                                <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+
+                                <p className="text-xs">AI 正在分析您的稅務資料... (若等待較久代表服務忙碌中)</p>
+
+                            </div>
+
+                        ) : (
+
+                            report && (
+
+                                <div className={`prose prose-sm max-w-none ${theme.id==='dark'?'prose-invert':''} text-sm leading-relaxed whitespace-pre-wrap`}>
+
+                                    {report.split('\n').map((line, idx) => (
+
+                                        <p key={idx} className={line.startsWith('**') || line.startsWith('#') ? 'font-bold mt-2 mb-1 text-base' : 'mb-1 opacity-90'}>
+
+                                            {line.replace(/\*\*/g, '').replace(/#/g, '')}
+
+                                        </p>
+
+                                    ))}
+
+                                    <div className="mt-4 text-xs opacity-50 text-right">
+
+                                        Generated by Gemini AI • 僅供參考，不代表正式法律意見
+
+                                    </div>
+
+                                </div>
+
+                            )
+
+                        )}
+
+                    </div>
+
+                )}
+
+                </section>
+
+            );
+
+        };
+
+
+
+        const DisclaimerFooter = ({ theme }) => (
+
+            <footer className={`mt-12 py-8 border-t ${theme.id === 'dark' ? 'border-slate-800 text-slate-500' : 'border-gray-200 text-gray-500'} text-xs text-center px-4 print:text-black print:border-t-2 print:border-black`}>
+
+                <div className="max-w-4xl mx-auto space-y-2">
+
+                    <p className="font-bold mb-2 flex items-center justify-center gap-2">
+
+                        <AlertCircle size={14} /> 專業免責聲明 (Professional Disclaimer)
+
+                    </p>
+
+                    <p>1. 本工具之試算結果僅供業務參考與內部訓練使用，不代表正式稅務申報結果或法律意見。</p>
+
+                    <p>2. 稅務法規（如房地合一稅、遺產及贈與稅法、所得基本稅額條例）可能隨時修訂，請依國稅局最新公告為準。</p>
+
+                    <p>3. 房地產相關數據（如公告現值、評定現值）需由使用者自行查證輸入，本工具不負資料正確性之責。</p>
+
+                    <p>4. 保險規劃之數值（含IRR、投資報酬率）均為假設模擬值，非保證獲利；實際解約金、保單價值準備金以保險公司正式建議書為準。</p>
+
+                    <p>5. 進行任何重大資產處分或稅務規劃前，強烈建議諮詢專業會計師、地政士或律師。</p>
+
+                </div>
+
+            </footer>
+
+        );
+
+
+
+        const CopyButton = ({ textToCopy, theme }) => {
+
+            const [copied, setCopied] = useState(false);
+
+            
+
+            const handleCopy = () => {
+
+                const textArea = document.createElement("textarea");
+
+                textArea.value = textToCopy;
+
+                textArea.style.top = "0";
+
+                textArea.style.left = "0";
+
+                textArea.style.position = "fixed";
+
+                document.body.appendChild(textArea);
+
+                textArea.focus();
+
+                textArea.select();
+
+                try {
+
+                document.execCommand('copy');
+
+                setCopied(true);
+
+                setTimeout(() => setCopied(false), 2000);
+
+                } catch (err) {
+
+                console.error('Fallback: Oops, unable to copy', err);
+
+                }
+
+                document.body.removeChild(textArea);
+
+            };
+
+
+
+            return (
+
+                <button 
+
+                    onClick={handleCopy} 
+
+                    className={`p-2 rounded-md transition-all hover:opacity-70 flex items-center gap-1 text-sm ${copied ? 'text-green-600 bg-green-50' : 'text-gray-600 hover:bg-gray-100'}`}
+
+                    title="複製客戶報告摘要"
+
+                >
+
+                    {copied ? <CheckCircle2 size={18} /> : <Copy size={18} />}
+
+                    <span className="hidden md:inline">{copied ? '已複製' : '摘要'}</span>
+
+                </button>
+
+            );
+
+        };
+
+
+
+        // --- App Component ---
+
+        function App() {
+
+            const [currentThemeId, setCurrentThemeId] = useState('nordic');
+
+            const [activeTab, setActiveTab] = useState('capital-gains');
+
+            const [isPresentationMode, setIsPresentationMode] = useState(false);
+
+            const [activeScenarioId, setActiveScenarioId] = useState('default');
+
+            
+
+            const theme = THEMES[currentThemeId];
+
+
+
+            // --- Safe LocalStorage State ---
+
+            const usePersistState = (key, defaultValue) => {
+
+                const [state, setState] = useState(() => {
+
+                    const scenarios = getScenarios();
+
+                    if (scenarios[activeScenarioId]?.data?.[key] !== undefined) {
+
+                        return scenarios[activeScenarioId].data[key];
+
+                    }
+
+                    return defaultValue;
+
+                });
+
+
+
+                useEffect(() => {
+
+                    const scenarios = getScenarios();
+
+                    if (!scenarios[activeScenarioId]) scenarios[activeScenarioId] = { name: '新客戶', data: {} };
+
+                    scenarios[activeScenarioId].data[key] = state;
+
+                    localStorage.setItem(STORAGE_PREFIX + 'scenarios', JSON.stringify(scenarios));
+
+                }, [key, state, activeScenarioId]);
+
+                
+
+                return [state, setState];
+
+            };
+
+
+
+            // State
+
+            const [buyPrice, setBuyPrice] = usePersistState('buyPrice', 1000);
+
+            const [sellPrice, setSellPrice] = usePersistState('sellPrice', 1500);
+
+            const [buyDate, setBuyDate] = usePersistState('buyDate', '2021-01-01');
+
+            const [sellDate, setSellDate] = usePersistState('sellDate', '2025-06-01');
+
+            const [renovationCost, setRenovationCost] = usePersistState('renovationCost', 0);
+
+            const [agentFee, setAgentFee] = usePersistState('agentFee', 0);
+
+            const [otherCosts, setOtherCosts] = usePersistState('otherCosts', 0);
+
+            const [landIncrementTax, setLandIncrementTax] = usePersistState('landIncrementTax', 0);
+
+            const [isSelfUse, setIsSelfUse] = usePersistState('isSelfUse', false);
+
+
+
+            const [oldMethod, setOldMethod] = usePersistState('oldMethod', 'standard');
+
+            const [oldBuyPrice, setOldBuyPrice] = usePersistState('oldBuyPrice', 500);
+
+            const [oldSellPrice, setOldSellPrice] = usePersistState('oldSellPrice', 1000);
+
+            const [oldCosts, setOldCosts] = usePersistState('oldCosts', 50);
+
+            const [houseRatio, setHouseRatio] = usePersistState('houseRatio', 30);
+
+            const [houseAssessedValue, setHouseAssessedValue] = usePersistState('houseAssessedValue', 30);
+
+            const [areaRatio, setAreaRatio] = usePersistState('areaRatio', 45);
+
+            const [incomeTaxRate, setIncomeTaxRate] = usePersistState('incomeTaxRate', 20);
+
+
+
+            const [estateForm, setEstateForm] = usePersistState('estateForm', {
+
+                landValue: 0, houseValue: 0, deposits: 0, securities: 0, otherAssets: 0,
+
+                hasSpouse: true, childrenCount: 2, parentCount: 0, siblingCount: 0, disabledCount: 0,
+
+                funeralCostChecked: true, spouseClaim: 0, publicLandValue: 0, debts: 0,
+
+            });
+
+
+
+            const [giftForm, setGiftForm] = usePersistState('giftForm', {
+
+                cashAmount: 500, propertyAssessed: 0, propertyMarket: 0,
+
+            });
+
+
+
+            const [insuranceForm, setInsuranceForm] = usePersistState('insuranceForm', {
+
+                type: 'savings', premium: 100, years: 6, duration: 10, rate: 2.25, age: 40, taxBracket: 10, 
+
+            });
+
+
+
+            // Handlers
+
+            const handleEstateChange = (name, value) => setEstateForm(prev => ({ ...prev, [name]: value }));
+
+            const handleGiftChange = (name, value) => setGiftForm(prev => ({ ...prev, [name]: value }));
+
+            const handleInsuranceChange = (name, value) => setInsuranceForm(prev => ({ ...prev, [name]: value }));
+
+            const handlePrint = () => window.print();
+
+            
+
+            const handleReset = () => {
+
+                if(window.confirm('確定要清除當前客戶資料並重置嗎？')) {
+
+                    const scenarios = getScenarios();
+
+                    scenarios[activeScenarioId].data = {}; 
+
+                    localStorage.setItem(STORAGE_PREFIX + 'scenarios', JSON.stringify(scenarios));
+
+                    window.location.reload();
+
+                }
+
+            };
+
+            
+
+            const handleNewScenario = () => {
+
+                const name = prompt("請輸入新客戶名稱", `客戶 ${new Date().toLocaleTimeString()}`);
+
+                if(name) {
+
+                    const id = Date.now().toString();
+
+                    const scenarios = getScenarios();
+
+                    scenarios[id] = { name, data: {} };
+
+                    localStorage.setItem(STORAGE_PREFIX + 'scenarios', JSON.stringify(scenarios));
+
+                    setActiveScenarioId(id);
+
+                    window.location.reload();
+
+                }
+
+            }
+
+
+
+            // --- Calculations ---
+
+
+
+            const newTaxResult = useMemo(() => {
+
+                const start = new Date(buyPrice ? buyDate : new Date());
+
+                const end = new Date(sellPrice ? sellDate : new Date());
+
+                const diffTime = Math.abs(end - start);
+
+                const yearsHeld = diffTime / (1000 * 60 * 60 * 24 * 365.25);
+
+                const totalInputCosts = renovationCost + agentFee + otherCosts;
+
+                const grossProfit = sellPrice - buyPrice - totalInputCosts - landIncrementTax;
+
+                let taxRate = 0.45;
+
+                let rateText = "45% (2年內)";
+
+                if (yearsHeld <= 2) { taxRate = 0.45; rateText = "45% (2年內)"; }
+
+                else if (yearsHeld <= 5) { taxRate = 0.35; rateText = "35% (2-5年)"; }
+
+                else if (yearsHeld <= 10) { taxRate = 0.20; rateText = "20% (5-10年)"; }
+
+                else { taxRate = 0.15; rateText = "15% (10年以上)"; }
+
+                let finalTax = 0;
+
+                if (isSelfUse) {
+
+                    if (yearsHeld >= 6) {
+
+                        const taxable = Math.max(0, grossProfit - 400);
+
+                        finalTax = taxable * 0.10;
+
+                        rateText = "10% (自用優惠)";
+
+                    } else {
+
+                        rateText += " (未滿6年)";
+
+                        finalTax = Math.max(0, grossProfit * taxRate);
+
+                    }
+
+                } else {
+
+                    finalTax = Math.max(0, grossProfit * taxRate);
+
+                }
+
+                return { yearsHeld: yearsHeld.toFixed(1), rateText, grossProfit: grossProfit.toFixed(1), finalTax: finalTax.toFixed(1), netProfit: (grossProfit - finalTax).toFixed(1) };
+
+            }, [buyPrice, sellPrice, buyDate, sellDate, renovationCost, agentFee, otherCosts, landIncrementTax, isSelfUse]);
+
+
+
+            const oldTaxResult = useMemo(() => {
+
+                let taxableIncome = 0;
+
+                if (oldMethod === 'actual') {
+
+                    const profit = Math.max(0, oldSellPrice - oldBuyPrice - oldCosts);
+
+                    taxableIncome = profit * (houseRatio / 100);
+
+                } else {
+
+                    taxableIncome = houseAssessedValue * (areaRatio / 100);
+
+                }
+
+                const estimatedTax = taxableIncome * (incomeTaxRate / 100);
+
+                return { taxableIncome: taxableIncome.toFixed(1), estimatedTax: estimatedTax.toFixed(1) };
+
+            }, [oldMethod, oldSellPrice, oldBuyPrice, oldCosts, houseRatio, houseAssessedValue, areaRatio, incomeTaxRate]);
+
+
+
+            const estateResult = useMemo(() => {
+
+                const { landValue, houseValue, deposits, securities, otherAssets, hasSpouse, childrenCount, parentCount, siblingCount, disabledCount, funeralCostChecked, spouseClaim, publicLandValue, debts } = estateForm;
+
+                const totalAssets = (landValue + houseValue + deposits + securities + otherAssets);
+
+                let calculatedDeductions = 0;
+
+                if (hasSpouse) calculatedDeductions += ESTATE_TAX_RULES_2025.deductions.spouse;
+
+                calculatedDeductions += childrenCount * ESTATE_TAX_RULES_2025.deductions.child;
+
+                calculatedDeductions += parentCount * ESTATE_TAX_RULES_2025.deductions.parent;
+
+                calculatedDeductions += siblingCount * ESTATE_TAX_RULES_2025.deductions.sibling;
+
+                calculatedDeductions += disabledCount * ESTATE_TAX_RULES_2025.deductions.disabled;
+
+                if (funeralCostChecked) calculatedDeductions += ESTATE_TAX_RULES_2025.deductions.funeral;
+
+                const totalSpecialDeductions = spouseClaim + debts + publicLandValue;
+
+                const totalDeductionsFinal = calculatedDeductions + totalSpecialDeductions;
+
+                const netTaxableEstate = Math.max(0, totalAssets - ESTATE_TAX_RULES_2025.exemption - totalDeductionsFinal);
+
+                let finalTaxAmount = 0;
+
+                let currentBracket = ESTATE_TAX_RULES_2025.brackets[0];
+
+                for (const bracket of ESTATE_TAX_RULES_2025.brackets) {
+
+                    if (netTaxableEstate <= bracket.limit) {
+
+                        finalTaxAmount = (netTaxableEstate * bracket.rate) - bracket.progressiveDeduction;
+
+                        currentBracket = bracket;
+
+                        break;
+
+                    }
+
+                }
+
+                const chartData = [
+
+                    { label: '房產', value: landValue + houseValue, color: '#3b82f6' }, 
+
+                    { label: '現金', value: deposits, color: '#10b981' }, 
+
+                    { label: '股票', value: securities, color: '#f59e0b' }, 
+
+                    { label: '其他', value: otherAssets, color: '#8b5cf6' }, 
+
+                ];
+
+                return { totalAssets, totalDeductionsFinal, netTaxableEstate, finalTaxAmount: Math.max(0, finalTaxAmount), taxRate: currentBracket.rate, chartData };
+
+            }, [estateForm]);
+
+
+
+            const giftResult = useMemo(() => {
+
+                const { cashAmount, propertyAssessed, propertyMarket } = giftForm;
+
+                const totalGiftValue = (cashAmount * 10000) + (propertyAssessed * 10000);
+
+                const netTaxableGift = Math.max(0, totalGiftValue - GIFT_TAX_RULES_2025.exemption);
+
+                let finalTaxAmount = 0;
+
+                let currentBracket = GIFT_TAX_RULES_2025.brackets[0];
+
+                for (const bracket of GIFT_TAX_RULES_2025.brackets) {
+
+                    if (netTaxableGift <= bracket.limit) {
+
+                        finalTaxAmount = (netTaxableGift * bracket.rate) - bracket.deduction;
+
+                        currentBracket = bracket;
+
+                        break;
+
+                    }
+
+                }
+
+                let taxIfCashGift = 0;
+
+                if (propertyMarket > 0) {
+
+                    const hypotheticalTotal = (cashAmount * 10000) + (propertyMarket * 10000);
+
+                    const hypotheticalNet = Math.max(0, hypotheticalTotal - GIFT_TAX_RULES_2025.exemption);
+
+                    for (const bracket of GIFT_TAX_RULES_2025.brackets) {
+
+                        if (hypotheticalNet <= bracket.limit) {
+
+                            taxIfCashGift = (hypotheticalNet * bracket.rate) - bracket.deduction;
+
+                            break;
+
+                        }
+
+                    }
+
+                }
+
+                const taxSavings = Math.max(0, taxIfCashGift - finalTaxAmount);
+
+                return { totalGiftValue, netTaxableGift, finalTaxAmount: Math.max(0, finalTaxAmount), taxRate: currentBracket.rate, taxSavings, hasProperty: propertyAssessed > 0, taxIfCashGift };
+
+            }, [giftForm]);
+
+
+
+            const insuranceResult = useMemo(() => {
+
+                const { type, premium, years, duration, rate, taxBracket } = insuranceForm;
+
+                const safeDuration = Math.max(1, duration || 1);
+
+                let chartData = [];
+
+                let cumulativePremium = 0;
+
+                let accumulatedValue = 0; 
+
+                const savingsSurrenderRatio = [0.6, 0.75, 0.85, 0.90, 0.95, 1.0]; 
+
+                for (let t = 1; t <= safeDuration; t++) {
+
+                    if (t <= years) {
+
+                        cumulativePremium += premium;
+
+                        accumulatedValue = (accumulatedValue + premium) * (1 + rate / 100);
+
+                    } else {
+
+                        accumulatedValue = accumulatedValue * (1 + rate / 100);
+
+                    }
+
+                    let finalDisplayValue = accumulatedValue;
+
+                    if (type === 'savings' && t <= 6) {
+
+                        const ratio = savingsSurrenderRatio[t-1] || 1.0;
+
+                        finalDisplayValue = accumulatedValue * ratio;
+
+                    }
+
+                    chartData.push({ year: t, paid: Math.round(cumulativePremium), value: Math.round(finalDisplayValue) });
+
+                }
+
+                const lastPoint = chartData.length > 0 ? chartData[chartData.length - 1] : { value: 0, paid: 0 };
+
+                const futureValue = lastPoint.value;
+
+                const profit = futureValue - lastPoint.paid;
+
+                const roi = lastPoint.paid > 0 ? (profit / lastPoint.paid) * 100 : 0;
+
+                let potentialTaxSaving = 0;
+
+                if (futureValue * 10000 <= INSURANCE_AMT_EXEMPTION) {
+
+                    potentialTaxSaving = futureValue * (taxBracket / 100);
+
+                }
+
+                return {
+
+                    totalCost: lastPoint.paid.toFixed(0),
+
+                    futureValue: futureValue.toFixed(0),
+
+                    profit: profit.toFixed(0),
+
+                    roi: roi.toFixed(1),
+
+                    chartData,
+
+                    potentialTaxSaving: potentialTaxSaving.toFixed(1),
+
+                    breakEvenYear: chartData.findIndex(d => d.value >= d.paid) + 1
+
+                };
+
+            }, [insuranceForm]);
+
+
+
+            // --- AI Context ---
+
+            const aiContext = useMemo(() => {
+
+                let data = {};
+
+                let tabName = "";
+
+                if (activeTab === 'capital-gains') {
+
+                    tabName = "房地合一稅 (2.0)";
+
+                    data = {
+
+                        buyPrice, sellPrice, buyDate, sellDate,
+
+                        costs: { renovationCost, agentFee, otherCosts, landIncrementTax },
+
+                        isSelfUse, result: newTaxResult
+
+                    };
+
+                } else if (activeTab === 'old-system') {
+
+                    tabName = "舊制財產交易所得";
+
+                    data = {
+
+                        method: oldMethod,
+
+                        input: oldMethod === 'standard' ? { houseAssessedValue, areaRatio } : { oldBuyPrice, oldSellPrice, oldCosts, houseRatio },
+
+                        incomeTaxRate, result: oldTaxResult
+
+                    };
+
+                } else if (activeTab === 'gift') {
+
+                    tabName = "贈與稅 (2025)";
+
+                    data = { form: giftForm, result: giftResult };
+
+                } else if (activeTab === 'estate') {
+
+                    tabName = "遺產稅 (2025)";
+
+                    data = { form: estateForm, result: estateResult };
+
+                } else if (activeTab === 'insurance') {
+
+                    tabName = "保險資產規劃";
+
+                    data = { form: insuranceForm, result: insuranceResult };
+
+                }
+
+                return { data, tabName };
+
+            }, [activeTab, buyPrice, sellPrice, buyDate, sellDate, renovationCost, agentFee, otherCosts, landIncrementTax, isSelfUse, newTaxResult, oldMethod, oldBuyPrice, oldSellPrice, oldCosts, houseRatio, houseAssessedValue, areaRatio, incomeTaxRate, oldTaxResult, giftForm, giftResult, estateForm, estateResult, insuranceForm, insuranceResult]);
+
+
+
+            // --- AI Suggestions ---
+
+            const aiSuggestions = useMemo(() => {
+
+                const suggestions = [];
+
+                if (activeTab === 'capital-gains') {
+
+                    const held = parseFloat(newTaxResult.yearsHeld);
+
+                    if (held < 2) suggestions.push({ type: 'warning', icon: <AlertCircle className="text-red-500" />, title: '高稅率警示 (45%)', content: '持有未滿 2 年，稅率 45%。' });
+
+                    else if (held > 1.8 && held < 2) suggestions.push({ type: 'tip', icon: <TrendingUp className="text-blue-500" />, title: '即將降稅', content: '再持有少許時間即滿 2 年，稅率降至 35%。' });
+
+                    if (isSelfUse && held < 6) suggestions.push({ type: 'warning', icon: <Info className="text-amber-500" />, title: '自用優惠未滿期', content: '需持有滿 6 年才享 400 萬免稅額。' });
+
+                    if (renovationCost === 0 && agentFee === 0) {
+
+                        suggestions.push({ type: 'tip', icon: <PiggyBank className="text-blue-500" />, title: '成本抵扣提醒', content: '若無法提供費用證明，國稅局僅允許以成交價 3% (上限 30 萬) 計算費用。' });
+
+                    }
+
+                }
+
+                if (activeTab === 'old-system') {
+
+                    if (oldMethod === 'standard') {
+
+                        suggestions.push({ type: 'tip', icon: <Info className="text-blue-500" />, title: '核實認定比較', content: '若當年買價較高，獲利低於部頒標準，採「核實認定」可能更划算。' });
+
+                    }
+
+                    if (incomeTaxRate >= 30) {
+
+                        suggestions.push({ type: 'warning', icon: <TrendingUp className="text-red-500" />, title: '累進稅率影響', content: '舊制所得併入綜所稅，您稅率較高，出售可能顯著增加稅負。' });
+
+                    }
+
+                }
+
+                if (activeTab === 'gift') {
+
+                    if (giftResult.taxSavings > 0) {
+
+                        suggestions.push({ type: 'success', icon: <Home className="text-green-500" />, title: '房地產節稅效益', content: `利用公告現值贈與，相較現金預估省下 ${formatCurrency(giftResult.taxSavings)} 稅金。` });
+
+                    }
+
+                    if (giftForm.cashAmount > 244 && !giftResult.hasProperty) {
+
+                        suggestions.push({ type: 'strategy', icon: <Users className="text-blue-500" />, title: '父母合贈策略', content: '若資金來自父母雙方，合計每年可贈與子女 488 萬元免稅。' });
+
+                    }
+
+                }
+
+                if (activeTab === 'estate') {
+
+                    if (estateResult.netTaxableEstate > 56210000) suggestions.push({ type: 'strategy', icon: <Sparkles className="text-purple-500" />, title: '建議分年贈與', content: `遺產淨額已達 ${estateResult.taxRate * 100}% 稅率。` });
+
+                    if (estateForm.hasSpouse && estateForm.spouseClaim === 0 && estateResult.totalAssets > 20000000) {
+
+                        suggestions.push({ type: 'warning', icon: <AlertCircle className="text-amber-500" />, title: '配偶剩餘財產差額', content: '資產較高且有配偶，善用此請求權可大幅降低遺產淨額。' });
+
+                    }
+
+                }
+
+                if (activeTab === 'insurance') {
+
+                    if (insuranceForm.type === 'savings' && insuranceResult.breakEvenYear > 0) {
+
+                        suggestions.push({ type: 'tip', icon: <Info className="text-blue-500" />, title: '保本點提示', content: `約第 ${insuranceResult.breakEvenYear} 年保單價值超過累積保費。` });
+
+                    }
+
+                    if (insuranceForm.age >= 70 || insuranceForm.type === 'savings') {
+
+                        suggestions.push({ type: 'tip', icon: <Shield className="text-blue-500" />, title: '實質課稅原則提醒', content: '高齡或重病投保需留意國稅局查核風險。' });
+
+                    }
+
+                }
+
+                return suggestions;
+
+            }, [activeTab, newTaxResult, isSelfUse, renovationCost, agentFee, oldMethod, incomeTaxRate, estateForm, estateResult, giftResult, giftForm, insuranceResult, insuranceForm]);
+
+
+
+            const getSummaryText = () => {
+
+                const today = new Date().toLocaleDateString('zh-TW');
+
+                let content = `📊 房產與資產稅務試算報告 (${today})\n────────────────────\n`;
+
+                
+
+                if (activeTab === 'capital-gains') {
+
+                    content += `【房地合一稅試算】\n🔹持有期間：${newTaxResult.yearsHeld} 年\n🔹稅前獲利：${newTaxResult.grossProfit} 萬\n🔹預估稅額：${newTaxResult.finalTax} 萬\n🔹稅後淨利：${newTaxResult.netProfit} 萬`;
+
+                } else if (activeTab === 'gift') {
+
+                    content += `【贈與稅試算 (2025)】\n🔹贈與總額：${formatCurrency(giftResult.totalGiftValue)}\n🔹預估稅額：${formatCurrency(giftResult.finalTaxAmount)}\n`;
+
+                    if (giftResult.taxSavings > 0) {
+
+                        content += `✨ 使用房產規劃預估節稅：${formatCurrency(giftResult.taxSavings)}`;
+
+                    }
+
+                } else if (activeTab === 'estate') {
+
+                    content += `【遺產稅試算 (2025)】\n🔹遺產總額：${formatCurrency(estateResult.totalAssets)}\n🔹預估稅額：${formatCurrency(estateResult.finalTaxAmount)}\n🔹適用稅率：${estateResult.taxRate * 100}%`;
+
+                } else if (activeTab === 'insurance') {
+
+                    content += `【保險資產規劃】\n🔹類型：${insuranceForm.type === 'savings' ? '儲蓄險' : '投資型'}\n🔹年繳保費：${insuranceForm.premium} 萬 (共 ${insuranceForm.years} 年)\n🔹${insuranceForm.duration} 年後價值：${insuranceResult.futureValue} 萬\n🔹預估獲利：${insuranceResult.profit} 萬 (報酬率 ${insuranceResult.roi}%)`;
+
+                }
+
+                content += `\n────────────────────\n⚠️ 試算結果僅供參考，實際稅額以國稅局核定為準。`;
+
+                return content;
+
+            };
+
+
+
+            const scenarios = useMemo(() => {
+
+                try {
+
+                    const saved = localStorage.getItem(STORAGE_PREFIX + 'scenarios');
+
+                    return saved ? JSON.parse(saved) : { 'default': { name: '預設客戶', data: {} } };
+
+                } catch { return { 'default': { name: '預設客戶', data: {} } }; }
+
+            }, []);
+
+
+
+            return (
+
+                <div className={`min-h-screen pb-24 lg:pb-0 ${theme.bgMain}`}>
+
+                
+
+                {/* --- Header --- */}
+
+                <header className={`sticky top-0 z-30 px-4 py-4 ${theme.header}`}>
+
+                    <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+
+                    <div className="flex items-center gap-3">
+
+                        <div className={`p-2 rounded-lg ${theme.id === 'dark' ? 'bg-cyan-900/50 text-cyan-400' : (theme.id === 'zen' ? 'bg-[#e6dfcc] text-[#595045]' : 'bg-[#c8e1d6] text-[#2c5f4c]')}`}>
+
+                        <Calculator size={24} />
+
+                        </div>
+
+                        <div>
+
+                        <h1 className="text-xl md:text-2xl font-bold tracking-tight">房產與資產稅務全能計算機</h1>
+
+                        <p className="text-xs opacity-60 flex items-center gap-2">
+
+                            <span className="hidden md:inline">整合 2025 遺產/贈與稅、房地合一 2.0</span>
+
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${theme.id==='dark'?'bg-slate-700':'bg-white/50'}`}>Sales Pro</span>
+
+                        </p>
+
+                        </div>
+
+                    </div>
+
+                    
+
+                    <div className="flex flex-wrap gap-2 justify-end items-center">
+
+                        {/* Scenario Switcher */}
+
+                        <div className="relative">
+
+                            <select 
+
+                                value={activeScenarioId}
+
+                                onChange={(e) => { if(e.target.value === 'new') handleNewScenario(); else window.location.reload(); setActiveScenarioId(e.target.value); }}
+
+                                className={`appearance-none pl-8 pr-8 py-1.5 rounded-lg text-sm font-bold cursor-pointer outline-none focus:ring-2 ${theme.id==='dark'?'bg-slate-800 text-white ring-cyan-500':'bg-white text-slate-700 ring-blue-200'}`}
+
+                            >
+
+                                {Object.entries(scenarios).map(([id, s]) => (
+
+                                    <option key={id} value={id}>{s.name}</option>
+
+                                ))}
+
+                                <option value="new">➕ 新增客戶...</option>
+
+                            </select>
+
+                            <Users size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none" />
+
+                        </div>
+
+
+
+                        <button 
+
+                            onClick={() => setIsPresentationMode(!isPresentationMode)}
+
+                            className={`p-2 rounded-md transition-all hover:opacity-80 flex items-center gap-1 text-sm font-bold ${isPresentationMode ? 'bg-indigo-100 text-indigo-600 ring-2 ring-indigo-500' : 'text-gray-500 hover:bg-gray-100'}`}
+
+                            title="切換簡報模式 (唯讀)"
+
+                        >
+
+                            {isPresentationMode ? <EyeOff size={18} /> : <Eye size={18} />}
+
+                            <span className="hidden md:inline">{isPresentationMode ? '退出簡報' : '簡報模式'}</span>
+
+                        </button>
+
+
+
+                        <button 
+
+                            onClick={handleReset} 
+
+                            className="p-2 rounded-md transition-all hover:bg-red-50 text-gray-400 hover:text-red-500"
+
+                            title="清除當前客戶資料"
+
+                        >
+
+                            <RotateCcw size={18} />
+
+                        </button>
+
+                        
+
+                        <CopyButton textToCopy={getSummaryText()} theme={theme} />
+
+                        
+
+                        <div className={`flex p-1 rounded-xl ${theme.id === 'dark' ? 'bg-slate-800 border border-slate-700' : (theme.id === 'zen' ? 'bg-[#f0ebe0]' : 'bg-[#e0e7e4]')}`}>
+
+                            {Object.values(THEMES).map(t => (
+
+                            <button
+
+                                key={t.id}
+
+                                onClick={() => setCurrentThemeId(t.id)}
+
+                                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${
+
+                                currentThemeId === t.id
+
+                                    ? (t.id === 'dark' ? 'bg-cyan-900 text-cyan-400 shadow' : (t.id === 'zen' ? 'bg-[#fff] text-[#595045] shadow-sm' : 'bg-white text-[#2c5f4c] shadow-sm'))
+
+                                    : 'opacity-40 hover:opacity-100'
+
+                                }`}
+
+                                title={t.name}
+
+                            >
+
+                                {t.icon}
+
+                            </button>
+
+                            ))}
+
+                        </div>
+
+                    </div>
+
+                    </div>
+
+                </header>
+
+
+
+                {/* --- Tab Navigation --- */}
+
+                <div className={`max-w-6xl mx-auto mt-6 px-4 print:hidden`}>
+
+                    <div className={`flex space-x-2 p-1 overflow-x-auto ${theme.id==='zen' ? '' : ''}`}>
+
+                    {[
+
+                        { id: 'capital-gains', label: '房地合一 (新制)', icon: <TrendingUp size={16}/> },
+
+                        { id: 'old-system', label: '舊制交易所得', icon: <Archive size={16}/> },
+
+                        { id: 'gift', label: '2025 贈與稅', icon: <Gift size={16}/> },
+
+                        { id: 'estate', label: '2025 遺產稅', icon: <Users size={16}/> },
+
+                        { id: 'insurance', label: '保險資產規劃', icon: <Umbrella size={16}/> }
+
+                    ].map((tab) => (
+
+                        <button
+
+                        key={tab.id}
+
+                        onClick={() => setActiveTab(tab.id)}
+
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm transition-all whitespace-nowrap ${activeTab === tab.id ? theme.tabActive : theme.tabInactive} ${theme.id === 'zen' ? 'rounded-none' : 'rounded-xl'}`}
+
+                        >
+
+                        {tab.icon}
+
+                        {tab.label}
+
+                        </button>
+
+                    ))}
+
+                    </div>
+
+                </div>
+
+
+
+                {/* --- Main Content --- */}
+
+                <main className="max-w-6xl mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+                    
+
+                    {/* === TAB 1: 房地合一稅 === */}
+
+                    {activeTab === 'capital-gains' && (
+
+                    <>
+
+                        <div className="lg:col-span-7 space-y-6">
+
+                        <section className={theme.card}>
+
+                            <div className={`flex items-center gap-2 mb-6 pb-2 border-b ${theme.id==='dark'?'border-slate-700':(theme.id==='zen'?'border-[#e6dfcc]':'border-gray-100')}`}>
+
+                                <Calendar className={theme.accentColor} />
+
+                                <h2 className="text-xl font-bold">交易資訊</h2>
+
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+                                <InputField label="買入價格 (萬)" type="number" value={buyPrice} onChange={v => setBuyPrice(parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                <InputField label="預計賣出 (萬)" type="number" value={sellPrice} onChange={v => setSellPrice(parseInput(v))} theme={theme} highlight readOnly={isPresentationMode} />
+
+                                <InputField label="買入日期" type="date" value={buyDate} onChange={setBuyDate} theme={theme} prefix={<Calendar size={16}/>} readOnly={isPresentationMode} />
+
+                                <InputField label="賣出日期" type="date" value={sellDate} onChange={setSellDate} theme={theme} prefix={<Calendar size={16}/>} readOnly={isPresentationMode} />
+
+                            </div>
+
+                        </section>
+
+
+
+                        <section className={theme.card}>
+
+                            <div className={`flex items-center gap-2 mb-6 pb-2 border-b ${theme.id==='dark'?'border-slate-700':(theme.id==='zen'?'border-[#e6dfcc]':'border-gray-100')}`}>
+
+                                <DollarSign className={theme.accentColor} />
+
+                                <h2 className="text-xl font-bold">成本與自用</h2>
+
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+                                <InputField label="仲介費 (萬)" type="number" value={agentFee} onChange={v => setAgentFee(parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                <InputField label="裝修費 (萬)" type="number" value={renovationCost} onChange={v => setRenovationCost(parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                <InputField label="代書/雜支 (萬)" type="number" value={otherCosts} onChange={v => setOtherCosts(parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                <InputField label="土地漲價總數額 (萬)" type="number" value={landIncrementTax} onChange={v => setLandIncrementTax(parseInput(v))} theme={theme} readOnly={isPresentationMode} warning="* 注意：請填稅單上的「土地漲價總數額」，非繳納的稅金金額。" />
+
+                            </div>
+
+                            <div className="mt-6 pt-4 border-t border-gray-100/10">
+
+                                <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-black/5 transition-colors">
+
+                                <input type="checkbox" checked={isSelfUse} onChange={(e) => setIsSelfUse(e.target.checked)} className="w-5 h-5 rounded text-blue-600" disabled={isPresentationMode} />
+
+                                <span className={`font-medium ${theme.id === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>符合自用住宅優惠 (滿6年 400萬免稅)</span>
+
+                                </label>
+
+                            </div>
+
+                        </section>
+
+                        </div>
+
+
+
+                        <div className="lg:col-span-5 relative">
+
+                        <div className="lg:sticky lg:top-24 space-y-6">
+
+                            {/* ... Result Card ... */}
+
+                            <section className={theme.card}>
+
+                                <h2 className={`text-center text-xl font-bold mb-6 opacity-80 ${theme.id === 'zen' ? 'tracking-widest' : ''}`}>房地合一稅試算</h2>
+
+                                <div className="space-y-2 mb-6">
+
+                                    <ResultRow label="持有期間" value={`${newTaxResult.yearsHeld} 年`} theme={theme} />
+
+                                    <ResultRow label="稅前獲利" value={`${newTaxResult.grossProfit} 萬`} theme={theme} />
+
+                                    <ResultRow label="適用稅率" value={newTaxResult.rateText} theme={theme} highlightColor="text-red-500" />
+
+                                </div>
+
+                                <div className={`${theme.resultBox} p-6 text-center`}>
+
+                                    <p className="text-sm mb-2 opacity-80 font-bold">預估應納稅額</p>
+
+                                    <p className="text-3xl font-black tracking-tight">{newTaxResult.finalTax} 萬</p>
+
+                                    <div className="mt-4 pt-4 border-t border-white/20">
+
+                                    <p className="text-sm opacity-80">稅後淨利</p>
+
+                                    <p className="text-xl font-bold text-emerald-400">{newTaxResult.netProfit} 萬</p>
+
+                                    </div>
+
+                                </div>
+
+                            </section>
+
+                            <AIAdvisor suggestions={aiSuggestions} theme={theme} contextData={aiContext.data} tabName={aiContext.tabName} />
+
+                        </div>
+
+                        </div>
+
+                    </>
+
+                    )}
+
+
+
+                    {/* === TAB 2: 舊制財產交易所得 === */}
+
+                    {activeTab === 'old-system' && (
+
+                    <>
+
+                        <div className="lg:col-span-7 space-y-6">
+
+                        <section className={theme.card}>
+
+                            <div className="flex gap-2 mb-6 print:hidden">
+
+                                <button onClick={() => setOldMethod('standard')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${oldMethod === 'standard' ? theme.primaryBtn : 'bg-gray-100 text-gray-500'}`} disabled={isPresentationMode}>部頒標準 (無證明)</button>
+
+                                <button onClick={() => setOldMethod('actual')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${oldMethod === 'actual' ? theme.primaryBtn : 'bg-gray-100 text-gray-500'}`} disabled={isPresentationMode}>核實認定 (有證明)</button>
+
+                            </div>
+
+
+
+                            {oldMethod === 'standard' ? (
+
+                                <div className="space-y-4">
+
+                                    <InputField label="房屋評定現值 (萬)" type="number" value={houseAssessedValue} onChange={v => setHouseAssessedValue(parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                    <InputField label="依部頒標準率 (%)" type="number" value={areaRatio} onChange={v => setAreaRatio(parseInput(v))} theme={theme} placeholder="高雄約 30-45%" readOnly={isPresentationMode} />
+
+                                </div>
+
+                            ) : (
+
+                                <div className="space-y-4">
+
+                                    <div className="grid grid-cols-2 gap-4">
+
+                                    <InputField label="買入總價 (萬)" type="number" value={oldBuyPrice} onChange={v => setOldBuyPrice(parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                    <InputField label="賣出總價 (萬)" type="number" value={oldSellPrice} onChange={v => setOldSellPrice(parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                    </div>
+
+                                    <InputField label="取得成本與費用 (萬)" type="number" value={oldCosts} onChange={v => setOldCosts(parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                    <InputField label="房地比 - 房屋占比 (%)" type="number" value={houseRatio} onChange={v => setHouseRatio(parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                </div>
+
+                            )}
+
+
+
+                            <div className="mt-6">
+
+                                <SelectField 
+
+                                    label="您的個人綜所稅級距"
+
+                                    value={incomeTaxRate}
+
+                                    onChange={v => setIncomeTaxRate(Number(v))}
+
+                                    theme={theme}
+
+                                    readOnly={isPresentationMode}
+
+                                    options={[
+
+                                    {value: 5, label: '5% (淨額 0-59萬)'},
+
+                                    {value: 12, label: '12% (淨額 59-133萬)'},
+
+                                    {value: 20, label: '20% (淨額 133-266萬)'},
+
+                                    {value: 30, label: '30% (淨額 266-498萬)'},
+
+                                    {value: 40, label: '40% (淨額 498萬以上)'},
+
+                                    ]}
+
+                                />
+
+                            </div>
+
+                        </section>
+
+                        </div>
+
+
+
+                        <div className="lg:col-span-5 relative">
+
+                        <div className="lg:sticky lg:top-24 space-y-6">
+
+                            <section className={theme.card}>
+
+                                <h2 className={`text-center text-xl font-bold mb-6 opacity-80 ${theme.id === 'zen' ? 'tracking-widest' : ''}`}>舊制稅額試算</h2>
+
+                                <div className="space-y-2 mb-6">
+
+                                    <ResultRow label="申報財產交易所得" value={`${oldTaxResult.taxableIncome} 萬`} theme={theme} />
+
+                                    <ResultRow label="適用綜所稅率" value={`${incomeTaxRate}%`} theme={theme} />
+
+                                </div>
+
+                                <div className={`${theme.resultBox} p-6 text-center`}>
+
+                                    <p className="text-sm mb-2 opacity-80 font-bold">預估增加稅金</p>
+
+                                    <p className="text-3xl font-black tracking-tight">{oldTaxResult.estimatedTax} 萬</p>
+
+                                </div>
+
+                            </section>
+
+                            <AIAdvisor suggestions={aiSuggestions} theme={theme} contextData={aiContext.data} tabName={aiContext.tabName} />
+
+                        </div>
+
+                        </div>
+
+                    </>
+
+                    )}
+
+
+
+                    {/* === TAB 3: 贈與稅 (Visualizer Update) === */}
+
+                    {activeTab === 'gift' && (
+
+                    <>
+
+                        <div className="lg:col-span-7 space-y-6">
+
+                        <section className={theme.card}>
+
+                            <div className={`flex items-center gap-2 mb-6 pb-2 border-b ${theme.id==='dark'?'border-slate-700':(theme.id==='zen'?'border-[#e6dfcc]':'border-gray-100')}`}>
+
+                                <Gift className={theme.accentColor} />
+
+                                <h2 className="text-xl font-bold">贈與設定</h2>
+
+                            </div>
+
+                            <div className="space-y-6">
+
+                                <InputField label="預計贈與現金 (萬)" type="number" value={giftForm.cashAmount} onChange={v => handleGiftChange('cashAmount', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                <div className={`p-4 rounded-xl border ${theme.id === 'dark' ? 'bg-slate-800 border-slate-600' : 'bg-gray-50 border-gray-100'} print:bg-white`}>
+
+                                    <h3 className={`text-sm font-bold mb-3 flex items-center gap-2 ${theme.id==='dark'?'text-slate-300':'text-gray-700'}`}><Home size={16}/> 房地產價值設定</h3>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+                                    <InputField label="公告土地+房屋現值 (萬)" type="number" value={giftForm.propertyAssessed} onChange={v => handleGiftChange('propertyAssessed', parseInput(v))} theme={theme} placeholder="計算稅額用" highlight readOnly={isPresentationMode} />
+
+                                    <InputField label="房產估計市價 (萬)" type="number" value={giftForm.propertyMarket} onChange={v => handleGiftChange('propertyMarket', parseInput(v))} theme={theme} placeholder="比較效益用" readOnly={isPresentationMode} />
+
+                                    </div>
+
+                                </div>
+
+                            </div>
+
+                        </section>
+
+                        </div>
+
+
+
+                        <div className="lg:col-span-5 relative">
+
+                        <div className="lg:sticky lg:top-24 space-y-6">
+
+                            <section className={theme.card}>
+
+                                <h2 className={`text-center text-xl font-bold mb-6 opacity-80 ${theme.id === 'zen' ? 'tracking-widest' : ''}`}>贈與稅試算</h2>
+
+                                <div className="space-y-2 mb-6">
+
+                                    <ResultRow label="贈與總額" value={giftResult.totalGiftValue} theme={theme} />
+
+                                    <ResultRow label="免稅額" value={GIFT_TAX_RULES_2025.exemption} isDeduction theme={theme} />
+
+                                    <ResultRow label="課稅淨額" value={giftResult.netTaxableGift} theme={theme} highlightColor="text-blue-500 font-bold" />
+
+                                </div>
+
+                                <div className={`${theme.resultBox} p-6 text-center`}>
+
+                                    <p className="text-sm mb-2 opacity-80 font-bold">預估應納贈與稅</p>
+
+                                    <p className="text-3xl font-black tracking-tight">{formatCurrency(giftResult.finalTaxAmount)}</p>
+
+                                </div>
+
+                                <TaxBracketProgress currentAmount={giftResult.netTaxableGift} brackets={GIFT_TAX_RULES_2025.brackets} theme={theme} />
+
+                            </section>
+
+                            
+
+                            {giftForm.propertyMarket > 0 && giftForm.propertyAssessed > 0 && (
+
+                                <ComparisonBarChart cashTax={giftResult.taxIfCashGift} propertyTax={giftResult.finalTaxAmount} theme={theme} />
+
+                            )}
+
+
+
+                            <AIAdvisor suggestions={aiSuggestions} theme={theme} contextData={aiContext.data} tabName={aiContext.tabName} />
+
+                        </div>
+
+                        </div>
+
+                    </>
+
+                    )}
+
+
+
+                    {/* === TAB 4: 遺產稅 === */}
+
+                    {activeTab === 'estate' && (
+
+                    <>
+
+                        <div className="lg:col-span-7 space-y-6">
+
+                        <section className={theme.card}>
+
+                            <div className={`flex items-center gap-2 mb-6 pb-2 border-b ${theme.id==='dark'?'border-slate-700':(theme.id==='zen'?'border-[#e6dfcc]':'border-gray-100')}`}>
+
+                            <DollarSign className={theme.accentColor} />
+
+                            <h2 className="text-xl font-bold">資產總額</h2>
+
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+
+                            <InputField label="土地公告現值合計" type="number" value={estateForm.landValue} onChange={v => handleEstateChange('landValue', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            <InputField label="房屋評定現值合計" type="number" value={estateForm.houseValue} onChange={v => handleEstateChange('houseValue', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            <InputField label="存款 / 現金" type="number" value={estateForm.deposits} onChange={v => handleEstateChange('deposits', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            <InputField label="股票 / 基金" type="number" value={estateForm.securities} onChange={v => handleEstateChange('securities', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            <div className="md:col-span-2">
+
+                                <InputField label="其他資產" type="number" value={estateForm.otherAssets} onChange={v => handleEstateChange('otherAssets', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            </div>
+
+                            </div>
+
+                            <div className={`p-4 rounded-xl border ${theme.id === 'dark' ? 'bg-slate-800 border-slate-600' : 'bg-gray-50 border-gray-100'} print:bg-white`}>
+
+                                <h3 className={`text-sm font-bold mb-4 flex items-center gap-2 ${theme.id==='dark'?'text-slate-300':'text-gray-700'}`}><PieChartIcon size={16}/> 資產分佈概況</h3>
+
+                                <div className="flex justify-center"><SimplePieChart data={estateResult.chartData} theme={theme} /></div>
+
+                            </div>
+
+                        </section>
+
+
+
+                        <section className={theme.card}>
+
+                            <div className={`flex items-center gap-2 mb-6 pb-2 border-b ${theme.id==='dark'?'border-slate-700':(theme.id==='zen'?'border-[#e6dfcc]':'border-gray-100')}`}>
+
+                            <Users className={theme.accentColor} />
+
+                            <h2 className="text-xl font-bold">家庭與扣除額</h2>
+
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+                            <div>
+
+                                <label className={theme.inputLabel}>是否有配偶 (扣除 553 萬)</label>
+
+                                <div className="flex gap-2">
+
+                                    <button className={`flex-1 py-2 rounded-lg transition-all text-sm font-bold ${!estateForm.hasSpouse ? theme.primaryBtn : 'bg-gray-100 text-gray-500'}`} onClick={() => handleEstateChange('hasSpouse', false)} disabled={isPresentationMode}>無</button>
+
+                                    <button className={`flex-1 py-2 rounded-lg transition-all text-sm font-bold ${estateForm.hasSpouse ? theme.primaryBtn : 'bg-gray-100 text-gray-500'}`} onClick={() => handleEstateChange('hasSpouse', true)} disabled={isPresentationMode}>有</button>
+
+                                </div>
+
+                            </div>
+
+                            <InputField label="直系卑親屬 (56萬/人)" type="number" value={estateForm.childrenCount} onChange={v => handleEstateChange('childrenCount', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            <InputField label="父母 (138萬/人)" type="number" value={estateForm.parentCount} onChange={v => handleEstateChange('parentCount', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            <InputField label="受扶養手足 (56萬/人)" type="number" value={estateForm.siblingCount} onChange={v => handleEstateChange('siblingCount', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            <div className="md:col-span-2">
+
+                                <InputField label="重度身心障礙 (加計693萬/人)" type="number" value={estateForm.disabledCount} onChange={v => handleEstateChange('disabledCount', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            </div>
+
+                            <div className="md:col-span-2 pt-2">
+
+                                <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-black/5 transition-colors">
+
+                                <input type="checkbox" checked={estateForm.funeralCostChecked} onChange={(e) => handleEstateChange('funeralCostChecked', e.target.checked)} className="w-5 h-5 rounded text-blue-600" disabled={isPresentationMode} />
+
+                                <span className={`font-medium ${theme.id === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>申報喪葬費 (定額扣除 138 萬)</span>
+
+                                </label>
+
+                            </div>
+
+                            </div>
+
+                        </section>
+
+
+
+                        <section className={theme.card}>
+
+                            <div className={`flex items-center gap-2 mb-6 pb-2 border-b ${theme.id==='dark'?'border-slate-700':(theme.id==='zen'?'border-[#e6dfcc]':'border-gray-100')}`}>
+
+                            <PiggyBank className={theme.accentColor} />
+
+                            <h2 className="text-xl font-bold">特殊扣除項目</h2>
+
+                            </div>
+
+                            <div className="space-y-4">
+
+                            <InputField label="配偶剩餘財產差額分配請求權" type="number" value={estateForm.spouseClaim} onChange={v => handleEstateChange('spouseClaim', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            <InputField label="公共設施保留地 / 農地價值 (免稅)" type="number" value={estateForm.publicLandValue} onChange={v => handleEstateChange('publicLandValue', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            <InputField label="被繼承人生前未償債務" type="number" value={estateForm.debts} onChange={v => handleEstateChange('debts', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                            </div>
+
+                        </section>
+
+                        </div>
+
+
+
+                        <div className="lg:col-span-5 relative">
+
+                        <div className="lg:sticky lg:top-24 space-y-6">
+
+                            <section className={theme.card}>
+
+                                <h2 className={`text-center text-xl font-bold mb-6 opacity-80 ${theme.id === 'zen' ? 'tracking-widest' : ''}`}>遺產稅試算</h2>
+
+                                <div className="space-y-2 mb-6">
+
+                                    <ResultRow label="遺產總額" value={estateResult.totalAssets} theme={theme} />
+
+                                    <ResultRow label="免稅額" value={ESTATE_TAX_RULES_2025.exemption} isDeduction theme={theme} />
+
+                                    <ResultRow label="扣除額總計" value={estateResult.totalDeductionsFinal} isDeduction theme={theme} />
+
+                                    <div className={`my-4 border-b ${theme.id === 'zen' ? 'border-[#e6dfcc]' : 'border-gray-100/10'}`}></div>
+
+                                    <div className="flex justify-between items-center font-bold text-lg mb-1">
+
+                                    <span className={theme.id==='dark'?'text-slate-400':'text-slate-700'}>課稅遺產淨額</span>
+
+                                    <span className={theme.id==='dark'?'text-slate-200':'text-slate-900'}>{formatCurrency(estateResult.netTaxableEstate)}</span>
+
+                                    </div>
+
+                                </div>
+
+                                <div className={`${theme.resultBox} p-6 text-center relative overflow-hidden`}>
+
+                                    <p className="text-sm mb-2 opacity-80 font-bold">預估應納遺產稅額</p>
+
+                                    <p className="text-3xl font-black tracking-tight">{formatCurrency(estateResult.finalTaxAmount)}</p>
+
+                                </div>
+
+                                <TaxBracketProgress currentAmount={estateResult.netTaxableEstate} brackets={ESTATE_TAX_RULES_2025.brackets} theme={theme} />
+
+                                <EstateStackChart totalAssets={estateResult.totalAssets} totalDeductions={estateResult.totalDeductionsFinal} theme={theme} />
+
+                            </section>
+
+                            <AIAdvisor suggestions={aiSuggestions} theme={theme} contextData={aiContext.data} tabName={aiContext.tabName} />
+
+                        </div>
+
+                        </div>
+
+                    </>
+
+                    )}
+
+
+
+                    {/* === TAB 5: 保險規劃 (Sales Pro Edition) === */}
+
+                    {activeTab === 'insurance' && (
+
+                    <>
+
+                        <div className="lg:col-span-7 space-y-6">
+
+                            <section className={theme.card}>
+
+                                <div className={`flex items-center gap-2 mb-6 pb-2 border-b ${theme.id==='dark'?'border-slate-700':(theme.id==='zen'?'border-[#e6dfcc]':'border-gray-100')}`}>
+
+                                <Umbrella className={theme.accentColor} />
+
+                                <h2 className="text-xl font-bold">保險內容設定</h2>
+
+                                </div>
+
+                                
+
+                                <div className="space-y-4">
+
+                                    <div className="flex gap-2 mb-4">
+
+                                        <button onClick={() => { handleInsuranceChange('type', 'savings'); handleInsuranceChange('rate', 2.25); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${insuranceForm.type === 'savings' ? theme.primaryBtn : 'bg-gray-100 text-gray-500'}`} disabled={isPresentationMode}>儲蓄險 (固定利率)</button>
+
+                                        <button onClick={() => { handleInsuranceChange('type', 'investment'); handleInsuranceChange('rate', 5.0); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${insuranceForm.type === 'investment' ? theme.primaryBtn : 'bg-gray-100 text-gray-500'}`} disabled={isPresentationMode}>投資型保單 (變動利率)</button>
+
+                                    </div>
+
+
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+                                        <InputField label="年繳保費 (萬)" type="number" value={insuranceForm.premium} onChange={v => handleInsuranceChange('premium', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                        <InputField label="繳費年期 (年)" type="number" value={insuranceForm.years} onChange={v => handleInsuranceChange('years', parseInput(v))} theme={theme} readOnly={isPresentationMode} />
+
+                                        <InputField label="累積期間 (年)" type="number" value={insuranceForm.duration} onChange={v => handleInsuranceChange('duration', parseInput(v))} theme={theme} placeholder="預計持有時間" readOnly={isPresentationMode} />
+
+                                        <InputField 
+
+                                            label={insuranceForm.type === 'savings' ? '預定/宣告利率 (%)' : '預估年化淨報酬率 (%)'} 
+
+                                            type="number" 
+
+                                            value={insuranceForm.rate} 
+
+                                            onChange={v => handleInsuranceChange('rate', parseInput(v))} 
+
+                                            theme={theme} 
+
+                                            step={0.1} 
+
+                                            readOnly={isPresentationMode} 
+
+                                        />
+
+                                        <InputField label="投保年齡 (歲)" type="number" value={insuranceForm.age} onChange={v => handleInsuranceChange('age', parseInput(v))} theme={theme} placeholder="用於評估實質課稅風險" readOnly={isPresentationMode} />
+
+                                        <SelectField 
+
+                                            label="預估您的遺產稅率級距" 
+
+                                            value={insuranceForm.taxBracket} 
+
+                                            onChange={v => handleInsuranceChange('taxBracket', Number(v))} 
+
+                                            theme={theme} 
+
+                                            readOnly={isPresentationMode}
+
+                                            options={[
+
+                                                {value: 10, label: '10% (淨額 5000萬以下)'},
+
+                                                {value: 15, label: '15% (淨額 5000萬-1億)'},
+
+                                                {value: 20, label: '20% (淨額 1億以上)'}
+
+                                            ]}
+
+                                        />
+
+                                    </div>
+
+                                </div>
+
+                            </section>
+
+                            
+
+                            <section className={theme.card}>
+
+                                <div className={`flex items-center gap-2 mb-4 pb-2 border-b ${theme.id==='dark'?'border-slate-700':(theme.id==='zen'?'border-[#e6dfcc]':'border-gray-100')}`}>
+
+                                    <BarChart2 className={theme.accentColor} size={20} />
+
+                                    <h2 className="text-lg font-bold">保單價值走勢分析</h2>
+
+                                </div>
+
+                                <LineChart data={insuranceResult.chartData} theme={theme} />
+
+                                <div className="flex justify-center gap-4 mt-2">
+
+                                    <div className="flex items-center gap-1 text-xs text-slate-500"><div className="w-3 h-1 bg-slate-300"></div>虛線：累積已繳保費</div>
+
+                                    <div className="flex items-center gap-1 text-xs text-slate-500"><div className={`w-3 h-1 ${theme.id==='nordic'?'bg-[#2f8565]':(theme.id==='dark'?'bg-[#22d3ee]':'bg-[#8f5e47]')}`}></div>實線：保單預估價值</div>
+
+                                </div>
+
+                            </section>
+
+                        </div>
+
+
+
+                        <div className="lg:col-span-5 relative">
+
+                            <div className="lg:sticky lg:top-24 space-y-6">
+
+                                <section className={theme.card}>
+
+                                    <h2 className={`text-center text-xl font-bold mb-6 opacity-80 ${theme.id === 'zen' ? 'tracking-widest' : ''}`}>保單價值試算</h2>
+
+                                    <div className="space-y-2 mb-6">
+
+                                        <ResultRow label="累積總繳保費" value={`${insuranceResult.totalCost} 萬`} theme={theme} />
+
+                                        <ResultRow label="預估期滿價值" value={`${insuranceResult.futureValue} 萬`} theme={theme} highlightColor="text-blue-500 font-bold" />
+
+                                        <ResultRow label="預估總損益" value={`${insuranceResult.profit} 萬`} theme={theme} highlightColor={parseFloat(insuranceResult.profit) >= 0 ? "text-green-500" : "text-red-500"} />
+
+                                    </div>
+
+                                    
+
+                                    <div className={`${theme.resultBox} p-6 text-center`}>
+
+                                        <p className="text-sm mb-2 opacity-80 font-bold">累積總報酬率 (ROI)</p>
+
+                                        <p className="text-3xl font-black tracking-tight">{insuranceResult.roi}%</p>
+
+                                    </div>
+
+
+
+                                    {parseFloat(insuranceResult.potentialTaxSaving) > 0 && (
+
+                                        <div className={`mt-4 p-4 rounded-xl border ${theme.id==='dark'?'bg-emerald-900/30 border-emerald-800 text-emerald-300':'bg-emerald-50 border-emerald-100 text-emerald-800'}`}>
+
+                                            <div className="flex items-center gap-2 font-bold mb-1">
+
+                                                <Shield size={16} /> 潛在遺產稅節稅效益
+
+                                            </div>
+
+                                            <p className="text-xs opacity-90 mb-2">若此保單符合免稅規定，相較於現金遺產，預估可節省：</p>
+
+                                            <p className="text-2xl font-black">
+
+                                                {insuranceResult.potentialTaxSaving} <span className="text-base font-normal">萬</span>
+
+                                            </p>
+
+                                        </div>
+
+                                    )}
+
+                                </section>
+
+                                <AIAdvisor suggestions={aiSuggestions} theme={theme} contextData={aiContext.data} tabName={aiContext.tabName} />
+
+                            </div>
+
+                        </div>
+
+                    </>
+
+                    )}
+
+                </main>
+
+
+
+                <div className={`lg:hidden fixed bottom-0 left-0 right-0 z-40 p-4 shadow-lg ${theme.mobileFooter}`}>
+
+                    <div className="max-w-6xl mx-auto flex items-center justify-between">
+
+                    <div>
+
+                        <p className="text-xs opacity-70 font-bold">預估稅額/價值</p>
+
+                        <p className={`text-xl font-black ${theme.accentColor}`}>
+
+                            {activeTab === 'capital-gains' && `${newTaxResult.finalTax} 萬`}
+
+                            {activeTab === 'old-system' && `${oldTaxResult.estimatedTax} 萬`}
+
+                            {activeTab === 'gift' && formatCurrency(giftResult.finalTaxAmount)}
+
+                            {activeTab === 'estate' && formatCurrency(estateResult.finalTaxAmount)}
+
+                            {activeTab === 'insurance' && `${insuranceResult.futureValue} 萬`}
+
+                        </p>
+
+                    </div>
+
+                    <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className={`px-4 py-2 text-sm font-bold flex items-center gap-2 ${theme.primaryBtn}`}><ArrowRight size={16} /> 重新檢視</button>
+
+                    </div>
+
+                </div>
+
+                
+
+                <DisclaimerFooter theme={theme} />
+
+
+
+                </div>
+
+            );
+
+        }
+
+
+
+        const root = createRoot(document.getElementById('root'));
+
+        root.render(<App />);
+
+    </script>
+
+</body>
+
+</html>
